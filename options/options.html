@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkedIn Email Assistant — Settings</title>
+  <style>
+    :root {
+      --blue: #0077B5; --blue-dark: #005f91; --blue-light: #e8f4fd;
+      --green: #057642; --red: #cc1016;
+      --bg: #f3f2ef; --surface: #fff; --border: #dce1e7;
+      --text: #191919; --text-2: #5a5a5a; --text-3: #8c8c8c;
+      --radius: 8px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px; color: var(--text); background: var(--bg);
+      display: flex; justify-content: center; padding: 32px 16px;
+    }
+    .container { width: 100%; max-width: 560px; }
+    h1 { font-size: 20px; font-weight: 700; color: var(--blue); margin-bottom: 24px; display: flex; align-items: center; gap: 10px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+    .card-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--blue); margin-bottom: 16px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 5px; }
+    input, select, textarea {
+      width: 100%; padding: 9px 11px; border: 1.5px solid var(--border);
+      border-radius: 6px; font-size: 14px; font-family: inherit; outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0,119,181,.12); }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a5a5a' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+    .help { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+    .input-row { display: flex; gap: 8px; }
+    .input-row input { flex: 1; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600;
+      cursor: pointer; border: none; font-family: inherit; transition: background .15s;
+    }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-primary:hover { background: var(--blue-dark); }
+    .btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text-2); }
+    .btn-outline:hover { border-color: var(--blue); color: var(--blue); }
+    .btn-block { width: 100%; }
+    .btn-sm { padding: 7px 14px; font-size: 13px; }
+    .connection-status { display: flex; align-items: center; gap: 8px; padding: 10px 0; color: var(--text-2); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .dot-grey { background: var(--text-3); } .dot-green { background: var(--green); }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+    .status-msg { border-radius: var(--radius); padding: 10px 14px; font-size: 13px; font-weight: 500; margin-top: 16px; display: none; }
+    .status-msg.success { background: #e6f4ee; color: var(--green); border: 1px solid #a6d5bc; display: block; }
+    .status-msg.error   { background: #fff0f0; color: var(--red);   border: 1px solid #f5c0c0; display: block; }
+    .attachment-box { border: 1.5px dashed var(--border); border-radius: 6px; padding: 12px; background: var(--bg); font-size: 13px; color: var(--text-3); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .attachment-name { color: var(--green); font-weight: 500; }
+    .remove-btn { margin-left: auto; background: transparent; border: none; cursor: pointer; color: var(--text-3); font-size: 16px; }
+    .remove-btn:hover { color: var(--red); }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+    a.back-link { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); text-decoration: none; font-size: 13px; margin-bottom: 20px; }
+    a.back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      Settings
+    </h1>
+
+    <!-- AI Provider -->
+    <div class="card">
+      <div class="card-title">AI Configuration</div>
+
+      <div class="form-group">
+        <label for="ai-provider">AI Provider</label>
+        <select id="ai-provider">
+          <option value="openai">OpenAI (GPT-4o)</option>
+          <option value="gemini">Google Gemini 1.5 Flash</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="ai-api-key">API Key</label>
+        <div class="input-row">
+          <input type="password" id="ai-api-key" placeholder="Enter your API key…" autocomplete="off" />
+          <button class="btn btn-outline btn-sm" id="toggle-key" type="button">Show</button>
+        </div>
+        <p class="help">Stored locally in your browser. Never transmitted to any external server other than the provider you select.</p>
+      </div>
+    </div>
+
+    <!-- Gmail -->
+    <div class="card">
+      <div class="card-title">Gmail Connection</div>
+      <div class="connection-status">
+        <span id="gmail-dot" class="dot dot-grey"></span>
+        <span id="gmail-status-text">Not connected</span>
+      </div>
+      <button id="gmail-connect-btn" class="btn btn-primary btn-block">Connect Gmail</button>
+      <button id="gmail-disconnect-btn" class="btn btn-outline btn-block" style="margin-top:8px; display:none;">Disconnect</button>
+    </div>
+
+    <!-- Default Resume -->
+    <div class="card">
+      <div class="card-title">Default Resume (PDF)</div>
+      <div id="resume-box" class="attachment-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+        <span id="resume-label">No default resume saved</span>
+        <button id="remove-resume-btn" class="remove-btn" style="display:none;" title="Remove">✕</button>
+      </div>
+      <label for="resume-upload" class="btn btn-outline btn-sm">
+        Upload PDF
+        <input type="file" id="resume-upload" accept=".pdf" class="visually-hidden" />
+      </label>
+      <p class="help" style="margin-top:6px;">Saved locally (max 5 MB). Attached to every email you send unless you detach it.</p>
+    </div>
+
+    <button id="save-btn" class="btn btn-primary btn-block">Save Settings</button>
+    <div id="status-msg" class="status-msg"></div>
+  </div>
+
+  <script src="../utils/gmail.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

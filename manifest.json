@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Email Assistant",
+  "version": "1.0.0",
+  "description": "Generate and send personalized emails from LinkedIn profiles using AI",
+
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "identity",
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://www.googleapis.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/in/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+
+  "action": {
+    "default_title": "LinkedIn Email Assistant"
+  },
+
+  "options_page": "options/options.html",
+
+  "oauth2": {
+    "client_id": "101155198905-i0l7cr9qcr9vh8trcilkpuk5cl32rphl.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.send",
+      "https://www.googleapis.com/auth/gmail.compose",
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/userinfo.email"
+    ]
+  }
+}
