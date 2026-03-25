@@ -31,6 +31,7 @@ const el = {
   profileHeadline:  $('profile-headline'),
   profileLocation:  $('profile-location'),
   profileLink:      $('profile-link'),
+  refreshProfileBtn: $('refresh-profile-btn'),
 
   // Step 1
   recipientEmail:   $('recipient-email'),
@@ -63,10 +64,18 @@ const el = {
   statusMsg:        $('status-msg'),
 
   // Settings
-  aiProvider:       $('ai-provider'),
-  aiApiKey:         $('ai-api-key'),
-  toggleKeyVis:     $('toggle-key-vis'),
-  gmailConnectBtn:  $('gmail-connect-btn'),
+  aiProvider:         $('ai-provider'),
+  aiApiKey:           $('ai-api-key'),
+  geminiModel:        $('gemini-model'),
+  geminiModelGroup:   $('gemini-model-group'),
+  groqModel:          $('groq-model'),
+  groqModelGroup:     $('groq-model-group'),
+  toggleKeyVis:       $('toggle-key-vis'),
+  testApiKeyBtn:      $('test-api-key-btn'),
+  testApiKeyResult:   $('test-api-key-result'),
+  redirectUriDisplay: $('redirect-uri-display'),
+  copyRedirectUri:    $('copy-redirect-uri'),
+  gmailConnectBtn:    $('gmail-connect-btn'),
   gmailDisconnectBtn: $('gmail-disconnect-btn'),
   gmailStatusDot:   $('gmail-status-dot'),
   gmailStatusText:  $('gmail-status-text'),
@@ -75,7 +84,11 @@ const el = {
   settingsResumeName: $('settings-resume-name'),
   settingsRemoveResume: $('settings-remove-resume'),
   settingsResumeUpload: $('settings-resume-upload'),
-  saveSettingsBtn:  $('save-settings-btn'),
+  saveSettingsBtn:      $('save-settings-btn'),
+  emailTemplate:        $('email-template'),
+  senderBackground:     $('sender-background'),
+  extractResumeBtn:     $('extract-from-resume-btn'),
+  extractResumeStatus:  $('extract-resume-status'),
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -87,24 +100,48 @@ async function init() {
   await checkGmailConnection();
   await refreshProfile();
   setDefaultScheduleTime();
+  populateRedirectUri();
   bindEvents();
+}
+
+function populateRedirectUri() {
+  if (el.redirectUriDisplay) {
+    el.redirectUriDisplay.value = GmailAPI.getRedirectURI();
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
    Settings persistence
    ═══════════════════════════════════════════════════════════ */
 async function loadSettings() {
-  const data = await chrome.storage.sync.get(['aiProvider', 'aiApiKey']);
-  if (data.aiProvider) el.aiProvider.value = data.aiProvider;
-  if (data.aiApiKey)   el.aiApiKey.value   = data.aiApiKey;
+  const data = await chrome.storage.sync.get(['aiProvider', 'aiApiKey', 'geminiModel', 'groqModel', 'emailTemplate', 'senderBackground']);
+  if (data.aiProvider)        el.aiProvider.value        = data.aiProvider;
+  if (data.aiApiKey)          el.aiApiKey.value          = data.aiApiKey;
+  if (data.geminiModel)       el.geminiModel.value       = data.geminiModel;
+  if (data.groqModel)         el.groqModel.value         = data.groqModel;
+  if (data.emailTemplate !== undefined) el.emailTemplate.value = data.emailTemplate;
+  if (data.senderBackground !== undefined) el.senderBackground.value = data.senderBackground;
+  updateModelVisibility();
 }
 
 async function saveSettings() {
   await chrome.storage.sync.set({
-    aiProvider: el.aiProvider.value,
-    aiApiKey:   el.aiApiKey.value.trim(),
+    aiProvider:       el.aiProvider.value,
+    aiApiKey:         el.aiApiKey.value.trim(),
+    geminiModel:      el.geminiModel.value,
+    groqModel:        el.groqModel.value,
+    emailTemplate:    el.emailTemplate.value,
+    senderBackground: el.senderBackground.value,
   });
   showStatus('Settings saved.', 'success', 2500);
+}
+
+function updateGeminiModelVisibility() { updateModelVisibility(); }
+
+function updateModelVisibility() {
+  const p = el.aiProvider.value;
+  el.geminiModelGroup.classList.toggle('hidden', p !== 'gemini');
+  el.groqModelGroup.classList.toggle('hidden',   p !== 'groq');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -165,6 +202,39 @@ function readFileAsBase64(file) {
     };
     reader.onerror = reject;
     reader.readAsDataURL(file);
+  });
+}
+
+// Best-effort text extraction from a PDF file.
+// Works for PDFs with an uncompressed text layer (most Word/Google Docs exports).
+function extractTextFromPDF(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const raw = e.target.result;
+        const words = [];
+
+        // Strategy 1: PDF text operators — (string)Tj and [(string)]TJ
+        const tjRe = /\(([^\\)]{2,100})\)\s*T[jJ]/g;
+        let m;
+        while ((m = tjRe.exec(raw)) !== null) {
+          const s = m[1].replace(/\\[0-9]{3}/g, ' ').replace(/\\\\/g, '').trim();
+          if (/[a-zA-Z]{2,}/.test(s)) words.push(s);
+        }
+
+        // Strategy 2: grab long readable sequences from uncompressed streams
+        const readable = raw.match(/[A-Za-z][A-Za-z0-9 ,.()\-+@&'"/]{12,}/g) || [];
+        words.push(...readable.filter(s => /[a-z]{4,}/i.test(s) && !/^(endobj|startxref|stream|xref|obj\b)/.test(s)));
+
+        const result = [...new Set(words)].join(' ').replace(/\s+/g, ' ').trim().slice(0, 2500);
+        resolve(result);
+      } catch (_) {
+        resolve('');
+      }
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsText(file, 'latin1'); // latin1 preserves all byte values as characters
   });
 }
 
@@ -286,7 +356,12 @@ async function generateEmail() {
   setBtnLoading(el.generateBtn, true, 'Generating…');
 
   try {
-    const { subject, body } = await AIHelper.generateEmail(profile, context, apiKey, provider);
+    const model = el.aiProvider.value === 'gemini' ? el.geminiModel.value
+              : el.aiProvider.value === 'groq'   ? el.groqModel.value
+              : undefined;
+    const template = el.emailTemplate.value.trim() || null;
+    const senderBg = el.senderBackground.value.trim() || null;
+    const { subject, body } = await AIHelper.generateEmail(profile, context, apiKey, provider, model, template, senderBg);
     el.emailSubject.value = subject;
     el.emailBody.value    = body;
     updateWordCount();
@@ -441,6 +516,65 @@ function updateSendBtnLabel() {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   Test API Key
+   ═══════════════════════════════════════════════════════════ */
+async function testApiKey() {
+  const apiKey   = el.aiApiKey.value.trim();
+  const provider = el.aiProvider.value;
+  const model    = el.aiProvider.value === 'gemini' ? el.geminiModel?.value
+                 : el.aiProvider.value === 'groq'   ? el.groqModel?.value
+                 : 'gpt-4o';
+  const resultEl = el.testApiKeyResult;
+
+  if (!apiKey) { resultEl.textContent = '⚠ Paste your API key first.'; resultEl.style.color = 'orange'; return; }
+
+  el.testApiKeyBtn.disabled = true;
+  el.testApiKeyBtn.textContent = 'Testing…';
+  resultEl.textContent = '';
+
+  try {
+    let res, data;
+    if (provider === 'openai') {
+      res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: model || 'gpt-4o', messages: [{ role: 'user', content: 'Say OK' }], max_tokens: 5 }),
+      });
+    } else if (provider === 'groq') {
+      res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: model || 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'Say OK' }], max_tokens: 5 }),
+      });
+    } else {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }], generationConfig: { maxOutputTokens: 5 } }),
+        }
+      );
+    }
+    data = await res.json();
+    if (res.ok) {
+      resultEl.textContent = '✓ API key works!';
+      resultEl.style.color = '#057642';
+    } else {
+      const msg = data?.error?.message || JSON.stringify(data);
+      resultEl.textContent = `✗ ${msg}`;
+      resultEl.style.color = '#cc1016';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Network error: ${e.message}`;
+    resultEl.style.color = '#cc1016';
+  } finally {
+    el.testApiKeyBtn.disabled = false;
+    el.testApiKeyBtn.textContent = 'Test API Key';
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
    Event bindings
    ═══════════════════════════════════════════════════════════ */
 function bindEvents() {
@@ -504,6 +638,12 @@ function bindEvents() {
     }
   });
 
+  // Settings — provider change shows/hides model selector
+  el.aiProvider.addEventListener('change', updateGeminiModelVisibility);
+
+  // Settings — Test API Key
+  $('test-api-key-btn').addEventListener('click', testApiKey);
+
   // Settings — API key visibility toggle
   el.toggleKeyVis.addEventListener('click', () => {
     const isHidden = el.aiApiKey.type === 'password';
@@ -513,6 +653,14 @@ function bindEvents() {
 
   // Settings — save
   el.saveSettingsBtn.addEventListener('click', saveSettings);
+
+  // Copy redirect URI
+  el.copyRedirectUri?.addEventListener('click', () => {
+    navigator.clipboard.writeText(el.redirectUriDisplay.value).then(() => {
+      el.copyRedirectUri.textContent = 'Copied!';
+      setTimeout(() => { el.copyRedirectUri.textContent = 'Copy'; }, 2000);
+    });
+  });
 
   // Settings — Gmail connect / disconnect
   el.gmailConnectBtn.addEventListener('click', connectGmail);
@@ -542,13 +690,45 @@ function bindEvents() {
     showStatus('Default resume removed.', 'info', 2500);
   });
 
+  // Settings — extract text from saved resume PDF into the senderBackground field
+  el.extractResumeBtn.addEventListener('click', async () => {
+    const stored = await chrome.storage.local.get(['resumeBase64', 'resumeName']);
+    if (!stored.resumeBase64) {
+      el.extractResumeStatus.textContent = 'No saved resume found. Upload one in the Default Resume section first.';
+      return;
+    }
+    el.extractResumeStatus.textContent = 'Extracting…';
+    try {
+      // Convert base64 back to a Blob/File for text extraction
+      const binary = atob(stored.resumeBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const file = new File([bytes], stored.resumeName || 'resume.pdf', { type: 'application/pdf' });
+      const text = await extractTextFromPDF(file);
+      if (text && text.length > 40) {
+        el.senderBackground.value = text;
+        el.extractResumeStatus.textContent = '✓ Extracted! Review and clean up, then Save Settings.';
+      } else {
+        el.extractResumeStatus.textContent = 'Could not extract text (PDF may be scanned/image-based). Paste your background manually.';
+      }
+    } catch (err) {
+      el.extractResumeStatus.textContent = 'Extraction failed. Please paste your background manually.';
+    }
+  });
+
   // Listen for page changes from background
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'pageChanged') {
-      // Refresh profile data when user navigates to a new profile
-      setTimeout(refreshProfile, 800); // small delay for page content to load
+      // Retry twice — LinkedIn SPA renders async, needs time
+      setTimeout(refreshProfile, 1500);
+      setTimeout(refreshProfile, 4000);
     }
   });
+
+  // Manual refresh button on profile card
+  if (el.refreshProfileBtn) {
+    el.refreshProfileBtn.addEventListener('click', refreshProfile);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════

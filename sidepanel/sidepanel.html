@@ -39,6 +39,11 @@
           <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/>
         </svg>
       </a>
+      <button id="refresh-profile-btn" class="profile-open-link" title="Re-scan profile" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Shown on non-LinkedIn pages -->
@@ -170,9 +175,30 @@
       <div class="form-group">
         <label for="ai-provider">Provider</label>
         <select id="ai-provider">
+          <option value="groq">Groq / Llama 3.3 (FREE ✓)</option>
           <option value="openai">OpenAI (GPT-4o)</option>
           <option value="gemini">Google Gemini</option>
         </select>
+      </div>
+
+      <div class="form-group" id="gemini-model-group">
+        <label for="gemini-model">Gemini Model</label>
+        <select id="gemini-model">
+          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite (Free tier ✓)</option>
+          <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Free tier ✓)</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash (Paid)</option>
+          <option value="gemini-1.5-pro">gemini-1.5-pro (Paid)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="groq-model-group">
+        <label for="groq-model">Groq Model</label>
+        <select id="groq-model">
+          <option value="llama-3.3-70b-versatile">Llama 3.3 70B (FREE ✓)</option>
+          <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (FREE ✓)</option>
+          <option value="mixtral-8x7b-32768">Mixtral 8x7B (FREE ✓)</option>
+        </select>
+        <small class="help-text">Get a free key at console.groq.com/keys — no billing needed.</small>
       </div>
 
       <div class="form-group">
@@ -183,6 +209,8 @@
             <svg id="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
+        <button id="test-api-key-btn" class="btn btn-outline btn-sm" style="margin-top:8px;width:100%;">Test API Key</button>
+        <div id="test-api-key-result" class="help-text" style="margin-top:5px;"></div>
         <small class="help-text">Stored locally in your browser. Never sent to our servers.</small>
       </div>
     </section>
@@ -190,6 +218,16 @@
     <!-- Gmail connection -->
     <section class="card">
       <div class="card-label">Gmail Connection</div>
+
+      <!-- Redirect URI helper — user must add this in Google Cloud Console -->
+      <div class="form-group">
+        <label>Authorized Redirect URI <small style="font-weight:400;text-transform:none;">(add this in Google Cloud Console)</small></label>
+        <div class="input-row">
+          <input type="text" id="redirect-uri-display" readonly style="font-size:11px;color:#5a5a5a;background:#f3f2ef;" />
+          <button id="copy-redirect-uri" class="btn btn-outline btn-sm" title="Copy">Copy</button>
+        </div>
+      </div>
+
       <div id="gmail-status" class="connection-status">
         <span id="gmail-status-dot" class="status-dot dot-grey"></span>
         <span id="gmail-status-text">Not connected</span>
@@ -224,6 +262,43 @@
         Upload Default Resume
         <input type="file" id="settings-resume-upload" accept=".pdf" class="visually-hidden" />
       </label>
+    </section>
+
+    <section class="card">
+      <div class="card-label">Your Background <span style="font-weight:400;text-transform:none;font-size:11px;color:#666;">used by AI to write about you</span></div>
+      <p style="font-size:12px;color:#555;margin:0 0 8px;">Paste a short summary from your resume — your skills, current role, and education. The AI uses this to write the "here's what I bring" part of the email.</p>
+      <div class="form-group" style="margin-bottom:6px;">
+        <textarea id="sender-background" rows="5" placeholder="e.g. Backend engineer with 3 years experience in Java, Python, REST APIs, PostgreSQL, MongoDB. Currently at ArcelorMittal on backend systems and performance optimisation. Master's in CS from Arizona State University."></textarea>
+      </div>
+      <button id="extract-from-resume-btn" class="btn btn-outline btn-sm" type="button" style="width:100%;">↓ Extract text from saved resume</button>
+      <div id="extract-resume-status" class="help-text" style="margin-top:5px;min-height:16px;"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-label">Email Template <span style="font-weight:400;text-transform:none;font-size:11px;color:#666;">(optional)</span></div>
+      <p style="font-size:12px;color:#555;margin:0 0 10px;">Write your email once. Use <code style="background:#eef;padding:1px 4px;border-radius:3px;font-size:11px;">[placeholders]</code> — the AI fills them in from each profile.</p>
+      <div class="form-group" style="margin-bottom:6px;">
+        <textarea id="email-template" rows="10" placeholder="e.g.
+
+Hi [Name],
+
+Saw your work at [Company] — impressive stuff. I've been building in [Their Field] for a few years and would love to explore if there are any [Role] openings on your team.
+
+Would a quick 15-min call work this week?
+
+Best,
+[Your Name]"></textarea>
+      </div>
+      <p style="font-size:11px;color:#888;margin:0 0 4px;"><strong>Available placeholders:</strong></p>
+      <p style="font-size:11px;color:#888;margin:0;line-height:1.7;">
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Name]</code> first name &nbsp;·&nbsp;
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Full Name]</code> full name &nbsp;·&nbsp;
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Company]</code> their company &nbsp;·&nbsp;
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Their Title]</code> their job title &nbsp;·&nbsp;
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Their Field]</code> their industry &nbsp;·&nbsp;
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Role]</code> role from your goal &nbsp;·&nbsp;
+        <code style="background:#eef;padding:1px 4px;border-radius:3px;">[Your Name]</code> left as-is for you to fill
+      </p>
     </section>
 
     <section class="card">

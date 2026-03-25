@@ -62,8 +62,12 @@ This lets the extension send email through your Gmail account.
    - Add yourself as a **Test user**.
 
 4. Go to **APIs & Services → Credentials → Create Credentials → OAuth Client ID**:
-   - Application type: **Chrome Extension**
-   - Item ID: paste the **Extension ID** you copied in Step 1
+   - Application type: **Web application**
+   - Name: anything (e.g. "LinkedIn Email Assistant")
+   - Under **Authorized redirect URIs** click **+ Add URI** and paste the URI
+     shown in the extension's Settings tab → Gmail Connection section.
+     It looks like: `https://EXTENSION_ID.chromiumapp.org/`
+     *(open the side panel → Settings tab → copy the "Authorized Redirect URI" field)*
 
 5. Click **Create**. Copy the generated **Client ID**
    (it looks like `123456789-abc.apps.googleusercontent.com`).

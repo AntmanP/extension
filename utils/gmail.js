@@ -2,8 +2,10 @@
  * utils/gmail.js — Gmail API helpers.
  * Exposes a global `GmailAPI` object used by sidepanel.js.
  *
- * Requires the 'identity' permission and the 'oauth2' block in manifest.json.
- * Scopes needed:
+ * Uses chrome.identity.launchWebAuthFlow (works with a Google "Web Application"
+ * OAuth client — no need for the "Chrome Extension" client type).
+ *
+ * Required OAuth scopes (set on your Google Cloud OAuth client):
  *   https://www.googleapis.com/auth/gmail.send
  *   https://www.googleapis.com/auth/gmail.compose
  *   https://www.googleapis.com/auth/gmail.modify
@@ -17,31 +19,105 @@ const GmailAPI = (() => {
 
   const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
+  const SCOPES = [
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/userinfo.email',
+  ].join(' ');
+
   /* ─── Auth ─────────────────────────────────────────────────────── */
 
-  function getAuthToken(interactive = false) {
+  /**
+   * Returns the OAuth redirect URI for this extension.
+   * The user must add this exact URI to their Google Cloud OAuth client's
+   * "Authorized redirect URIs" list.
+   */
+  function getRedirectURI() {
+    return chrome.identity.getRedirectURL();
+  }
+
+  /**
+   * Get a valid access token.
+   * - If a non-expired token is cached in local storage, return it immediately.
+   * - If interactive=true, launch the Google OAuth consent page to get a fresh token.
+   * - If interactive=false and no valid cached token exists, throws an error.
+   */
+  async function getAuthToken(interactive = false) {
+    // 1. Return cached token if still valid
+    const stored = await chrome.storage.local.get(['gmailToken', 'gmailTokenExpiry']);
+    if (stored.gmailToken && stored.gmailTokenExpiry > Date.now()) {
+      return stored.gmailToken;
+    }
+
+    if (!interactive) {
+      throw new Error('No valid cached token. Please connect Gmail.');
+    }
+
+    // 2. Launch the OAuth consent flow
+    const clientId = chrome.runtime.getManifest().oauth2?.client_id;
+    if (!clientId || clientId.startsWith('REPLACE_WITH')) {
+      throw new Error(
+        'OAuth client_id is not configured. Open manifest.json and set the client_id.'
+      );
+    }
+
+    const redirectUrl = chrome.identity.getRedirectURL();
+    const authUrl =
+      `https://accounts.google.com/o/oauth2/auth` +
+      `?client_id=${encodeURIComponent(clientId)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUrl)}` +
+      `&response_type=token` +
+      `&scope=${encodeURIComponent(SCOPES)}` +
+      `&prompt=select_account`;
+
     return new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive }, (token) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!token) {
-          reject(new Error('No token returned.'));
-        } else {
-          resolve(token);
+      chrome.identity.launchWebAuthFlow(
+        { url: authUrl, interactive: true },
+        async (responseUrl) => {
+          if (chrome.runtime.lastError || !responseUrl) {
+            reject(
+              new Error(
+                chrome.runtime.lastError?.message || 'Auth flow was cancelled.'
+              )
+            );
+            return;
+          }
+          try {
+            // Token is returned in the URL hash fragment
+            const hash = new URL(responseUrl).hash.slice(1);
+            const params = new URLSearchParams(hash);
+            const token = params.get('access_token');
+            const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
+
+            if (!token) {
+              reject(new Error('No access_token found in the OAuth response.'));
+              return;
+            }
+
+            // Cache the token with a 2-minute safety buffer before real expiry
+            await chrome.storage.local.set({
+              gmailToken:       token,
+              gmailTokenExpiry: Date.now() + (expiresIn - 120) * 1000,
+            });
+
+            resolve(token);
+          } catch (e) {
+            reject(new Error('Failed to parse the OAuth response URL.'));
+          }
         }
-      });
+      );
     });
   }
 
-  function revokeToken(token) {
-    return new Promise((resolve) => {
-      chrome.identity.removeCachedAuthToken({ token }, () => {
-        // Also revoke on Google's servers
-        fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`)
-          .catch(() => {})
-          .finally(resolve);
-      });
-    });
+  async function revokeToken(token) {
+    // Clear the local cache first
+    await chrome.storage.local.remove(['gmailToken', 'gmailTokenExpiry']);
+    // Best-effort server-side revoke
+    await fetch(
+      `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`,
+      { method: 'POST' }
+    ).catch(() => {});
   }
 
   async function getUserEmail(token) {
@@ -208,5 +284,5 @@ const GmailAPI = (() => {
     return res.json();
   }
 
-  return { getAuthToken, revokeToken, getUserEmail, sendEmail };
+  return { getAuthToken, revokeToken, getUserEmail, sendEmail, getRedirectURI };
 })();

@@ -5,6 +5,10 @@
   const $ = id => document.getElementById(id);
 
   const aiProvider    = $('ai-provider');
+  const geminiModel   = $('gemini-model');
+  const geminiModelGroup = $('gemini-model-group');
+  const groqModel     = $('groq-model');
+  const groqModelGroup = $('groq-model-group');
   const aiApiKey      = $('ai-api-key');
   const toggleKey     = $('toggle-key');
   const gmailDot      = $('gmail-dot');
@@ -21,9 +25,19 @@
   let gmailToken = null;
 
   /* ── Load settings ─────────────────────────────────────── */
-  const stored = await chrome.storage.sync.get(['aiProvider', 'aiApiKey']);
-  if (stored.aiProvider) aiProvider.value = stored.aiProvider;
-  if (stored.aiApiKey)   aiApiKey.value   = stored.aiApiKey;
+  const stored = await chrome.storage.sync.get(['aiProvider', 'aiApiKey', 'geminiModel', 'groqModel']);
+  if (stored.aiProvider)  aiProvider.value  = stored.aiProvider;
+  if (stored.aiApiKey)    aiApiKey.value    = stored.aiApiKey;
+  if (stored.geminiModel) geminiModel.value = stored.geminiModel;
+  if (stored.groqModel)   groqModel.value   = stored.groqModel;
+
+  function updateModelVisibility() {
+    const p = aiProvider.value;
+    geminiModelGroup.style.display = p === 'gemini' ? '' : 'none';
+    groqModelGroup.style.display   = p === 'groq'   ? '' : 'none';
+  }
+  updateModelVisibility();
+  aiProvider.addEventListener('change', updateModelVisibility);
 
   /* ── Load resume ───────────────────────────────────────── */
   const resumeData = await chrome.storage.local.get(['resumeName']);
@@ -124,8 +138,10 @@
 
   saveBtn.addEventListener('click', async () => {
     await chrome.storage.sync.set({
-      aiProvider: aiProvider.value,
-      aiApiKey:   aiApiKey.value.trim(),
+      aiProvider:  aiProvider.value,
+      aiApiKey:    aiApiKey.value.trim(),
+      geminiModel: geminiModel.value,
+      groqModel:   groqModel.value,
     });
     showMsg('Settings saved!', 'success');
     setTimeout(() => { statusMsg.className = 'status-msg'; }, 3000);
