@@ -429,6 +429,21 @@ select {
 /* ─── Misc ──────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 
+/* ─── Scheduled emails list ─────────────────────────────── */
+.scheduled-empty { text-align: center; color: var(--text-3); font-size: 12px; padding: 20px 0; }
+.scheduled-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.scheduled-item:last-child { border-bottom: none; }
+.scheduled-item-info { flex: 1; min-width: 0; }
+.scheduled-item-to   { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scheduled-item-subj { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.scheduled-item-time { font-size: 11px; color: var(--blue); margin-top: 4px; }
+
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;

@@ -1,3 +1,5 @@
+importScripts('utils/gmail.js');
+
 // Open side panel automatically when the extension icon is clicked
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
@@ -48,5 +50,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
     });
     return true; // keep the message channel open for the async reply
+  }
+
+  if (message.action === 'scheduleEmail') {
+    const { emailData, scheduledTime } = message;
+    const alarmName = `scheduledEmail_${Date.now()}`;
+    // Store scheduledTime alongside emailData so the panel can display it
+    chrome.storage.local.set({ [alarmName]: { ...emailData, _scheduledTime: scheduledTime } })
+      .then(() => {
+        chrome.alarms.create(alarmName, { when: new Date(scheduledTime).getTime() });
+        sendResponse({ success: true });
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+});
+
+// Fire scheduled emails when their alarm triggers
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (!alarm.name.startsWith('scheduledEmail_')) return;
+
+  const stored = await chrome.storage.local.get(alarm.name);
+  const emailData = stored[alarm.name];
+  if (!emailData) return;
+
+  await chrome.storage.local.remove(alarm.name);
+
+  try {
+    let token;
+    try {
+      token = await GmailAPI.getAuthToken(false);
+    } catch {
+      // Cached token expired — re-authenticate
+      token = await GmailAPI.getAuthToken(true);
+    }
+    await GmailAPI.sendEmail({ token, ...emailData });
+    chrome.runtime.sendMessage({ action: 'scheduledEmailSent', to: emailData.to }).catch(() => {});
+  } catch (err) {
+    console.error('Scheduled email send failed:', err.message);
   }
 });

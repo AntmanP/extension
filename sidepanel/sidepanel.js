@@ -63,6 +63,10 @@ const el = {
   // Status
   statusMsg:        $('status-msg'),
 
+  // Scheduled tab
+  scheduledList:    $('scheduled-list'),
+  scheduledModeDesc: $('scheduled-mode-desc'),
+
   // Settings
   aiProvider:         $('ai-provider'),
   aiApiKey:           $('ai-api-key'),
@@ -89,6 +93,10 @@ const el = {
   senderBackground:     $('sender-background'),
   extractResumeBtn:     $('extract-from-resume-btn'),
   extractResumeStatus:  $('extract-resume-status'),
+  scriptUrl:            $('script-url'),
+  scriptSecret:         $('script-secret'),
+  testScriptBtn:        $('test-script-btn'),
+  testScriptResult:     $('test-script-result'),
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -114,13 +122,15 @@ function populateRedirectUri() {
    Settings persistence
    ═══════════════════════════════════════════════════════════ */
 async function loadSettings() {
-  const data = await chrome.storage.sync.get(['aiProvider', 'aiApiKey', 'geminiModel', 'groqModel', 'emailTemplate', 'senderBackground']);
+  const data = await chrome.storage.sync.get(['aiProvider', 'aiApiKey', 'geminiModel', 'groqModel', 'emailTemplate', 'senderBackground', 'scriptUrl', 'scriptSecret']);
   if (data.aiProvider)        el.aiProvider.value        = data.aiProvider;
   if (data.aiApiKey)          el.aiApiKey.value          = data.aiApiKey;
   if (data.geminiModel)       el.geminiModel.value       = data.geminiModel;
   if (data.groqModel)         el.groqModel.value         = data.groqModel;
   if (data.emailTemplate !== undefined) el.emailTemplate.value = data.emailTemplate;
   if (data.senderBackground !== undefined) el.senderBackground.value = data.senderBackground;
+  if (data.scriptUrl)         el.scriptUrl.value         = data.scriptUrl;
+  if (data.scriptSecret)      el.scriptSecret.value      = data.scriptSecret;
   updateModelVisibility();
 }
 
@@ -132,6 +142,8 @@ async function saveSettings() {
     groqModel:        el.groqModel.value,
     emailTemplate:    el.emailTemplate.value,
     senderBackground: el.senderBackground.value,
+    scriptUrl:        el.scriptUrl.value.trim(),
+    scriptSecret:     el.scriptSecret.value.trim(),
   });
   showStatus('Settings saved.', 'success', 2500);
 }
@@ -420,25 +432,61 @@ async function sendEmail() {
   setBtnLoading(el.sendBtn, true, mode === 'schedule' ? 'Scheduling…' : 'Sending…');
 
   try {
-    // Refresh token silently before sending
-    const token = await GmailAPI.getAuthToken(false);
-
-    const result = await GmailAPI.sendEmail({
-      token,
-      from:            state.gmailEmail,
-      to,
-      subject,
-      body,
-      attachmentName:   resume?.name   || null,
-      attachmentBase64: resume?.base64 || null,
-      scheduledTime:    scheduledTime?.toISOString() || null,
-    });
-
-    if (result.scheduled) {
-      showStatus(`Email scheduled for ${scheduledTime.toLocaleString()}.`, 'success');
-    } else if (result.draft) {
-      showStatus(`Saved as draft. ${result.message}`, 'info');
+    if (mode === 'schedule') {
+      const script = await getScriptConfig_();
+      if (script) {
+        // Server-side scheduling via Google Apps Script — works when Chrome/laptop is off
+        const res = await fetch(script.url, {
+          method: 'POST',
+          redirect: 'follow',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action:          'schedule',
+            secret:          script.secret,
+            to,
+            subject,
+            body,
+            attachmentName:   resume?.name   || null,
+            attachmentBase64: resume?.base64 || null,
+            scheduledTime:   scheduledTime.toISOString(),
+          }),
+        });
+        const rawText = await res.text();
+        if (rawText.trim().startsWith('<')) {
+          throw new Error('Apps Script returned an HTML page — redeploy the script with a new version, then try again.');
+        }
+        const result = JSON.parse(rawText);
+        if (!result.success) throw new Error(result.error || 'Scheduling failed.');
+        showStatus(`✅ Scheduled via Google Apps Script for ${scheduledTime.toLocaleString()}.`, 'success');
+      } else {
+        // Fallback: chrome.alarms (Chrome must be open at send time)
+        const response = await chrome.runtime.sendMessage({
+          action: 'scheduleEmail',
+          emailData: {
+            from:            state.gmailEmail,
+            to,
+            subject,
+            body,
+            attachmentName:   resume?.name   || null,
+            attachmentBase64: resume?.base64 || null,
+          },
+          scheduledTime: scheduledTime.toISOString(),
+        });
+        if (!response?.success) throw new Error(response?.error || 'Scheduling failed.');
+        showStatus(`⏰ Scheduled for ${scheduledTime.toLocaleString()}. (Tip: set up Server Scheduler so Chrome doesn’t need to be open.)`, 'info');
+      }
+      loadScheduledEmails();
     } else {
+      const token = await GmailAPI.getAuthToken(false);
+      await GmailAPI.sendEmail({
+        token,
+        from:            state.gmailEmail,
+        to,
+        subject,
+        body,
+        attachmentName:   resume?.name   || null,
+        attachmentBase64: resume?.base64 || null,
+      });
       showStatus('Email sent successfully!', 'success');
     }
 
@@ -484,6 +532,129 @@ function setBtnLoading(btn, loading, text, iconHtml = '') {
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function getScriptConfig_() {
+  const data = await chrome.storage.sync.get(['scriptUrl', 'scriptSecret']);
+  if (data.scriptUrl && data.scriptSecret) {
+    return { url: data.scriptUrl, secret: data.scriptSecret };
+  }
+  return null;
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadScheduledEmails() {
+  if (!el.scheduledList) return;
+
+  const script = await getScriptConfig_();
+
+  if (script) {
+    // ── Server-side queue (Apps Script) ──────────────────────────
+    if (el.scheduledModeDesc) {
+      el.scheduledModeDesc.innerHTML = '✅ <strong>Server Scheduler active.</strong> Emails send from Google\'s servers — your laptop and Chrome do not need to be open.';
+      el.scheduledModeDesc.style.color = '#057642';
+    }
+    try {
+      const res  = await fetch(script.url, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list', secret: script.secret }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        el.scheduledList.innerHTML = `<div class="scheduled-empty">Could not load: ${escHtml(data.error)}</div>`;
+        return;
+      }
+      if (!data.jobs.length) {
+        el.scheduledList.innerHTML = '<div class="scheduled-empty">No scheduled emails.</div>';
+        return;
+      }
+      el.scheduledList.innerHTML = '';
+      data.jobs.forEach(job => {
+        const humanTime = new Date(job.scheduledTime).toLocaleString();
+        const item = document.createElement('div');
+        item.className = 'scheduled-item';
+        item.innerHTML = `
+          <div class="scheduled-item-info">
+            <div class="scheduled-item-to">${escHtml(job.to || '—')}</div>
+            <div class="scheduled-item-subj">${escHtml(job.subject || '(no subject)')}</div>
+            <div class="scheduled-item-time">☁️ ${humanTime}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-cancel-script="${escHtml(job.id)}" title="Cancel">Cancel</button>
+        `;
+        el.scheduledList.appendChild(item);
+      });
+      el.scheduledList.querySelectorAll('[data-cancel-script]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const jobId = btn.dataset.cancelScript;
+          try {
+            await fetch(script.url, {
+              method: 'POST',
+              redirect: 'follow',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'cancel', secret: script.secret, jobId }),
+            });
+          } catch (_) {}
+          loadScheduledEmails();
+        });
+      });
+    } catch (_) {
+      el.scheduledList.innerHTML = '<div class="scheduled-empty">Could not reach the Apps Script server.</div>';
+    }
+    return;
+  }
+
+  // ── Fallback: chrome.alarms queue ────────────────────────────
+  if (el.scheduledModeDesc) {
+    el.scheduledModeDesc.innerHTML = '⚠️ <strong>Server Scheduler not configured.</strong> Chrome must be open at send time. Go to <strong>Settings → Server Scheduler</strong> to remove this limitation.';
+    el.scheduledModeDesc.style.color = '#b45309';
+  }
+  const alarms  = await chrome.alarms.getAll();
+  const pending = alarms.filter(a => a.name.startsWith('scheduledEmail_'));
+
+  if (pending.length === 0) {
+    el.scheduledList.innerHTML = '<div class="scheduled-empty">No scheduled emails.<br><small style="color:#888;">Tip: configure Server Scheduler in Settings so emails send without Chrome.</small></div>';
+    return;
+  }
+
+  const stored = await chrome.storage.local.get(pending.map(a => a.name));
+
+  el.scheduledList.innerHTML = '';
+  pending
+    .sort((a, b) => a.scheduledTime - b.scheduledTime)
+    .forEach(alarm => {
+      const data = stored[alarm.name];
+      if (!data) return;
+      const humanTime = new Date(alarm.scheduledTime).toLocaleString();
+      const item = document.createElement('div');
+      item.className = 'scheduled-item';
+      item.innerHTML = `
+        <div class="scheduled-item-info">
+          <div class="scheduled-item-to">${escHtml(data.to || '—')}</div>
+          <div class="scheduled-item-subj">${escHtml(data.subject || '(no subject)')}</div>
+          <div class="scheduled-item-time">⏰ ${humanTime} <span style="color:#c50;font-size:10px;">(Chrome must be open)</span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" data-cancel="${escHtml(alarm.name)}" title="Cancel">Cancel</button>
+      `;
+      el.scheduledList.appendChild(item);
+    });
+
+  el.scheduledList.querySelectorAll('[data-cancel]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.cancel;
+      await chrome.alarms.clear(name);
+      await chrome.storage.local.remove(name);
+      loadScheduledEmails();
+    });
+  });
 }
 
 function setDefaultScheduleTime() {
@@ -644,6 +815,46 @@ function bindEvents() {
   // Settings — Test API Key
   $('test-api-key-btn').addEventListener('click', testApiKey);
 
+  // Settings — Test Apps Script connection
+  el.testScriptBtn.addEventListener('click', async () => {
+    const url    = el.scriptUrl.value.trim();
+    const secret = el.scriptSecret.value.trim();
+    const res_el = el.testScriptResult;
+    if (!url || !secret) { res_el.textContent = '⚠ Paste the URL and secret first.'; res_el.style.color = 'orange'; return; }
+    el.testScriptBtn.disabled = true;
+    el.testScriptBtn.textContent = 'Testing…';
+    res_el.textContent = '';
+    try {
+      const res  = await fetch(url, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list', secret }),
+      });
+      const text = await res.text();
+      if (text.trim().startsWith('<')) {
+        res_el.innerHTML = '✗ Google returned an HTML page instead of JSON.<br>'
+          + '<strong>Fix:</strong> Open the Apps Script editor → Run <code>processEmailQueue</code> once manually to grant Gmail permission, then try again.';
+        res_el.style.color = '#cc1016';
+        return;
+      }
+      const data = JSON.parse(text);
+      if (data.success) {
+        res_el.textContent = `✓ Connected! ${data.jobs.length} scheduled job(s).`;
+        res_el.style.color = '#057642';
+      } else {
+        res_el.textContent = `✗ ${data.error}`;
+        res_el.style.color = '#cc1016';
+      }
+    } catch (err) {
+      res_el.textContent = `✗ ${err.message}`;
+      res_el.style.color = '#cc1016';
+    } finally {
+      el.testScriptBtn.disabled = false;
+      el.testScriptBtn.textContent = 'Test Connection';
+    }
+  });
+
   // Settings — API key visibility toggle
   el.toggleKeyVis.addEventListener('click', () => {
     const isHidden = el.aiApiKey.type === 'password';
@@ -716,12 +927,23 @@ function bindEvents() {
     }
   });
 
-  // Listen for page changes from background
+  // Listen for messages from background
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'pageChanged') {
       // Retry twice — LinkedIn SPA renders async, needs time
       setTimeout(refreshProfile, 1500);
       setTimeout(refreshProfile, 4000);
+    }
+    if (msg.action === 'scheduledEmailSent') {
+      showStatus(`Scheduled email to ${msg.to} was sent successfully.`, 'success', 6000);
+      loadScheduledEmails();
+    }
+  });
+
+  // Load scheduled list when the tab is clicked
+  el.tabBtns.forEach(btn => {
+    if (btn.dataset.tab === 'scheduled') {
+      btn.addEventListener('click', loadScheduledEmails);
     }
   });
 

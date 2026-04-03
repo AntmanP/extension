@@ -83,7 +83,45 @@ This lets the extension send email through your Gmail account.
 
 ---
 
-## Step 3 — Get an AI API key
+## Step 3 — (Optional but recommended) Set up Server Scheduler
+
+By default, scheduled emails only fire when Chrome is open. The Server Scheduler
+runs on Google's servers 24/7, so emails send even when your laptop is off.
+
+### 3a — Create the Apps Script
+
+1. Go to **https://script.google.com** → click **New Project**.
+2. Delete the default code and paste the entire contents of `scripts/Code.gs`
+   from this repo.
+3. Click **Project Settings** (gear icon, left sidebar) → **Script Properties**
+   → **Add property**:
+   - Key: `AUTH_TOKEN`
+   - Value: any strong secret string you make up (e.g. 32+ random characters).
+   Click **Save**.
+
+### 3b — Deploy as a web app
+
+4. Click **Deploy → New Deployment**.
+5. Set:
+   - Type: **Web app**
+   - Execute as: **Me** (your Google account)
+   - Who has access: **Anyone**
+6. Click **Deploy**. Copy the **Web App URL**
+   (looks like `https://script.google.com/macros/s/…/exec`).
+
+### 3c — Connect to the extension
+
+7. Open the extension's **Settings** tab → **Server Scheduler** section.
+8. Paste the **Web App URL** and the **AUTH_TOKEN** you chose.
+9. Click **Save Settings**, then click **Test Connection** — you should see
+   "✓ Connected!".
+
+> **Note:** When you redeploy the script (e.g. after edits), choose
+> "Manage Deployments → Edit → Use latest code" to keep the same URL.
+
+---
+
+## Step 4 — Get an AI API key
 
 ### Option A — OpenAI (GPT-4o)
 1. Visit **https://platform.openai.com/api-keys**
@@ -96,18 +134,20 @@ This lets the extension send email through your Gmail account.
 
 ---
 
-## Step 4 — Configure the extension
+## Step 5 — Configure the extension
 
 1. Click the extension icon in the Chrome toolbar (or navigate to any page and
    click the icon — the side panel will open).
 2. Go to the **Settings** tab inside the side panel (or right-click the extension
    icon → Options).
 3. **AI Configuration**: select your provider and paste the API key.
-4. **Gmail Connection**: click "Connect Gmail Account" and go through Google's
+4. **Gmail Connection**: click “Connect Gmail Account” and go through Google’s
    OAuth consent flow.
-5. **Default Resume**: upload your PDF resume (max 5 MB). It will be attached
+5. **Server Scheduler** (optional): paste your Apps Script URL and token,
+   then click Test Connection.
+6. **Default Resume**: upload your PDF resume (max 5 MB). It will be attached
    automatically to every email.
-6. Click **Save Settings**.
+7. Click **Save Settings**.
 
 ---
 
@@ -128,11 +168,14 @@ This lets the extension send email through your Gmail account.
 
 ## Notes
 
-### Gmail scheduled send
-The extension attempts to schedule emails using the `deliveryTime` field in the
-Gmail API. If your Google Workspace plan doesn't support this, the extension
-automatically creates a **Gmail Draft** and opens your Gmail Drafts folder so
-you can use Gmail's built-in "Schedule Send" button.
+### Scheduled email delivery
+If the **Server Scheduler** (Apps Script) is configured, scheduled emails are
+queued on Google’s servers and fire at exactly the right time regardless of
+whether your laptop or Chrome is on. The email appears in your Gmail **Sent**
+folder once delivered.
+
+If the Server Scheduler is **not** configured, the extension falls back to
+`chrome.alarms` — Chrome must be running at the scheduled time.
 
 ### LinkedIn DOM changes
 LinkedIn regularly updates its page structure. If profile data stops being
@@ -156,5 +199,7 @@ class names.
 | "Please navigate to a LinkedIn profile page first" | Make sure the URL is `linkedin.com/in/…` (not a company page or search) |
 | Profile not scraped | Scroll down on the profile page to trigger LinkedIn's lazy loading, then click the refresh icon |
 | Gmail OAuth error | Check that your Client ID is correct in manifest.json and that you're listed as a test user in Google Cloud Console |
-| "Invalid API key" | Double-check you pasted the key correctly in Settings; OpenAI keys start with `sk-` |
+| “Invalid API key” | Double-check you pasted the key correctly in Settings; OpenAI keys start with `sk-` |
 | Extension not visible | Make sure you enabled the Side Panel via the extension icon click |
+| Scheduled email not sending | Make sure Server Scheduler is configured (Settings → Server Scheduler), or that Chrome is open if using the fallback |
+| “Unauthorized” in Test Connection | The AUTH_TOKEN in Script Properties doesn’t match what you pasted in extension Settings |

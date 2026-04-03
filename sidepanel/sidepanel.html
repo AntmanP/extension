@@ -19,6 +19,7 @@
     </div>
     <nav class="header-tabs">
       <button class="tab-btn active" data-tab="compose">Compose</button>
+      <button class="tab-btn" data-tab="scheduled">Scheduled</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
     </nav>
   </header>
@@ -241,6 +242,22 @@
       </button>
     </section>
 
+    <!-- Server Scheduler -->
+    <section class="card">
+      <div class="card-label">Server Scheduler <span style="font-weight:400;text-transform:none;font-size:11px;color:#057642;">&#x2714; sends even when laptop is off</span></div>
+      <p style="font-size:12px;color:#555;margin:0 0 10px;">Deploy the included <code style="background:#eef;padding:1px 4px;border-radius:3px;font-size:11px;">scripts/Code.gs</code> to your Google Account. Emails are then sent server-side &mdash; no Chrome or laptop needed. See <strong>SETUP.md Step 3</strong> for instructions.</p>
+      <div class="form-group">
+        <label for="script-url">Apps Script Web App URL</label>
+        <input type="url" id="script-url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label for="script-secret">Secret Token</label>
+        <input type="password" id="script-secret" placeholder="Must match AUTH_TOKEN in Script Properties" autocomplete="off" />
+      </div>
+      <button id="test-script-btn" class="btn btn-outline btn-sm" type="button" style="width:100%;">Test Connection</button>
+      <div id="test-script-result" class="help-text" style="margin-top:5px;min-height:16px;"></div>
+    </section>
+
     <!-- Default resume -->
     <section class="card">
       <div class="card-label">Default Resume</div>
@@ -309,6 +326,17 @@ Best,
     </section>
 
   </div><!-- /settings -->
+
+  <!-- ═══════════  SCHEDULED TAB  ═══════════ -->
+  <div id="scheduled" class="tab-content hidden">
+    <section class="card">
+      <div class="card-label">Scheduled Emails</div>
+      <p id="scheduled-mode-desc" class="help-text" style="margin-bottom:10px;"></p>
+      <div id="scheduled-list">
+        <div class="scheduled-empty">No scheduled emails.</div>
+      </div>
+    </section>
+  </div><!-- /scheduled -->
 
   <script src="../utils/gmail.js"></script>
   <script src="../utils/ai.js"></script>

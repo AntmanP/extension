@@ -128,7 +128,7 @@ const GmailAPI = (() => {
   /* ─── Send / Schedule ─────────────────────────────────────────── */
 
   /**
-   * Sends or schedules an email via Gmail API.
+   * Sends an email immediately via Gmail API.
    *
    * @param {object} opts
    * @param {string} opts.token           OAuth bearer token
@@ -138,21 +138,13 @@ const GmailAPI = (() => {
    * @param {string} opts.body            Plain-text email body
    * @param {string|null} opts.attachmentName    PDF filename
    * @param {string|null} opts.attachmentBase64  Base64-encoded PDF (no data: prefix)
-   * @param {string|null} opts.scheduledTime     ISO 8601 datetime string (RFC 3339), or null
-   * @returns {Promise<{id, scheduled, draft, message?}>}
+   * @returns {Promise<{id, draft: false}>}
    */
   async function sendEmail(opts) {
-    const { token, from, to, subject, body, attachmentName, attachmentBase64, scheduledTime } = opts;
+    const { token, from, to, subject, body, attachmentName, attachmentBase64 } = opts;
 
     const mimeRaw   = buildMimeMessage({ from, to, subject, body, attachmentName, attachmentBase64 });
     const rawBase64 = encodeBase64Url(mimeRaw);
-
-    const reqBody = { raw: rawBase64 };
-
-    if (scheduledTime) {
-      // Gmail API scheduled send — deliveryTime as RFC 3339 timestamp
-      reqBody.deliveryTime = scheduledTime;
-    }
 
     const res = await fetch(`${BASE}/messages/send`, {
       method:  'POST',
@@ -160,54 +152,16 @@ const GmailAPI = (() => {
         Authorization:  `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(reqBody),
+      body: JSON.stringify({ raw: rawBase64 }),
     });
 
     if (!res.ok) {
-      if (scheduledTime) {
-        // Gmail API may not support deliveryTime in all account types.
-        // Fallback: save as draft and open Gmail.
-        return await createScheduledDraft(token, rawBase64, scheduledTime);
-      }
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson?.error?.message || `HTTP ${res.status}`);
     }
 
     const data = await res.json();
-    return { ...data, scheduled: !!scheduledTime, draft: false };
-  }
-
-  /**
-   * Fallback: creates a Gmail draft when scheduled send via API is unavailable,
-   * and opens Gmail so the user can manually schedule it.
-   */
-  async function createScheduledDraft(token, rawBase64, scheduledTime) {
-    const res = await fetch(`${BASE}/drafts`, {
-      method:  'POST',
-      headers: {
-        Authorization:  `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ message: { raw: rawBase64 } }),
-    });
-
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson?.error?.message || `Draft creation failed (HTTP ${res.status})`);
-    }
-
-    const draft = await res.json();
-
-    // Open Gmail Drafts folder so the user can schedule manually
-    chrome.tabs.create({ url: 'https://mail.google.com/mail/u/0/#drafts' });
-
-    const humanTime = new Date(scheduledTime).toLocaleString();
-    return {
-      id:        draft.id,
-      scheduled: false,
-      draft:     true,
-      message:   `Draft created. Please open Gmail → Drafts and use "Schedule Send" to send at ${humanTime}.`,
-    };
+    return { ...data, draft: false };
   }
 
   /* ─── MIME builder ────────────────────────────────────────────── */
