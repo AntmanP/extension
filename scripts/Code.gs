@@ -35,13 +35,30 @@ function doPost(e) {
 
     if (data.action === 'schedule') {
       const jobId = Utilities.getUuid();
+
+      // Save PDF to Drive so it doesn't blow the Properties 500 KB quota.
+      // Only the tiny Drive file ID is stored in the property.
+      let driveFileId = null;
+      if (data.attachmentBase64 && data.attachmentName) {
+        const blob = Utilities.newBlob(
+          Utilities.base64Decode(data.attachmentBase64),
+          'application/pdf',
+          data.attachmentName
+        );
+        const folder = getOrCreateFolder_();
+        const driveFile = folder.createFile(blob);
+        driveFileId = driveFile.getId();
+      }
+
       const job = {
-        id:            jobId,
-        to:            data.to,
-        subject:       data.subject,
-        body:          data.body,
-        scheduledTime: data.scheduledTime,
-        createdAt:     new Date().toISOString(),
+        id:             jobId,
+        to:             data.to,
+        subject:        data.subject,
+        body:           data.body,
+        attachmentName: data.attachmentName || null,
+        driveFileId:    driveFileId,
+        scheduledTime:  data.scheduledTime,
+        createdAt:      new Date().toISOString(),
       };
       PropertiesService.getScriptProperties().setProperty('job_' + jobId, JSON.stringify(job));
       ensureTrigger_();
@@ -49,6 +66,14 @@ function doPost(e) {
     }
 
     if (data.action === 'cancel') {
+      // Also trash the Drive attachment file if one was stored
+      try {
+        const raw = PropertiesService.getScriptProperties().getProperty('job_' + data.jobId);
+        if (raw) {
+          const job = JSON.parse(raw);
+          if (job.driveFileId) DriveApp.getFileById(job.driveFileId).setTrashed(true);
+        }
+      } catch (_) {}
       PropertiesService.getScriptProperties().deleteProperty('job_' + data.jobId);
       return jsonOut_({ success: true });
     }
@@ -105,7 +130,27 @@ function processEmailQueue() {
 }
 
 function sendJobEmail_(job) {
-  GmailApp.sendEmail(job.to, job.subject, job.body);
+  const options = {};
+  if (job.driveFileId && job.attachmentName) {
+    try {
+      const file = DriveApp.getFileById(job.driveFileId);
+      options.attachments = [file.getAs('application/pdf')];
+      file.setTrashed(true); // clean up after sending
+    } catch (_) {
+      // Drive file missing — send without attachment
+    }
+  }
+  GmailApp.sendEmail(job.to, job.subject, job.body, options);
+}
+
+/**
+ * Run this function ONCE manually from the Apps Script editor to grant
+ * both Gmail and Drive permissions before using the web app.
+ */
+function authorizeAll() {
+  DriveApp.getRootFolder(); // triggers Drive auth
+  GmailApp.getInboxThreads(0, 1); // triggers Gmail auth
+  Logger.log('Authorization complete.');
 }
 
 /** Creates a 1-minute recurring trigger if one doesn't already exist. */
@@ -126,6 +171,18 @@ function getQueuedJobs_() {
     }
   }
   return jobs.sort((a, b) => new Date(a.scheduledTime) - new Date(b.scheduledTime));
+}
+
+/**
+ * Returns the "LinkedIn Email Assistant — Attachments" folder in Drive,
+ * creating it if it doesn't exist yet. All temp PDFs land here so you
+ * can bulk-delete them from one place when the folder grows too large.
+ */
+function getOrCreateFolder_() {
+  const FOLDER_NAME = 'LinkedIn Email Assistant — Attachments';
+  const folders = DriveApp.getFoldersByName(FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(FOLDER_NAME);
 }
 
 function isAuthorized_(secret) {
