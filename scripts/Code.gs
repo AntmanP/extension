@@ -36,14 +36,12 @@ function doPost(e) {
     if (data.action === 'schedule') {
       const jobId = Utilities.getUuid();
       const job = {
-        id:               jobId,
-        to:               data.to,
-        subject:          data.subject,
-        body:             data.body,
-        attachmentBase64: data.attachmentBase64 || null,
-        attachmentName:   data.attachmentName   || null,
-        scheduledTime:    data.scheduledTime,
-        createdAt:        new Date().toISOString(),
+        id:            jobId,
+        to:            data.to,
+        subject:       data.subject,
+        body:          data.body,
+        scheduledTime: data.scheduledTime,
+        createdAt:     new Date().toISOString(),
       };
       PropertiesService.getScriptProperties().setProperty('job_' + jobId, JSON.stringify(job));
       ensureTrigger_();
@@ -107,16 +105,7 @@ function processEmailQueue() {
 }
 
 function sendJobEmail_(job) {
-  const options = {};
-  if (job.attachmentBase64 && job.attachmentName) {
-    const blob = Utilities.newBlob(
-      Utilities.base64Decode(job.attachmentBase64),
-      'application/pdf',
-      job.attachmentName
-    );
-    options.attachments = [blob];
-  }
-  GmailApp.sendEmail(job.to, job.subject, job.body, options);
+  GmailApp.sendEmail(job.to, job.subject, job.body);
 }
 
 /** Creates a 1-minute recurring trigger if one doesn't already exist. */

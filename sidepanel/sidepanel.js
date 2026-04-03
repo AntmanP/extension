@@ -441,14 +441,13 @@ async function sendEmail() {
           redirect: 'follow',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action:          'schedule',
-            secret:          script.secret,
+            action:        'schedule',
+            secret:        script.secret,
             to,
             subject,
             body,
-            attachmentName:   resume?.name   || null,
-            attachmentBase64: resume?.base64 || null,
-            scheduledTime:   scheduledTime.toISOString(),
+            scheduledTime: scheduledTime.toISOString(),
+            // Note: attachments are not sent via server scheduler (no Drive permission needed)
           }),
         });
         const rawText = await res.text();
@@ -457,7 +456,8 @@ async function sendEmail() {
         }
         const result = JSON.parse(rawText);
         if (!result.success) throw new Error(result.error || 'Scheduling failed.');
-        showStatus(`✅ Scheduled via Google Apps Script for ${scheduledTime.toLocaleString()}.`, 'success');
+        const attachNote = resume ? ' (resume not attached — server scheduler limitation)' : '';
+        showStatus(`✅ Scheduled via Google Apps Script for ${scheduledTime.toLocaleString()}.${attachNote}`, 'success');
       } else {
         // Fallback: chrome.alarms (Chrome must be open at send time)
         const response = await chrome.runtime.sendMessage({
