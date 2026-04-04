@@ -19,7 +19,7 @@
     </div>
     <nav class="header-tabs">
       <button class="tab-btn active" data-tab="compose">Compose</button>
-      <button class="tab-btn" data-tab="scheduled">Scheduled</button>
+      <button class="tab-btn" data-tab="scheduled">Tracker</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
     </nav>
   </header>
@@ -281,13 +281,21 @@ Best,
 
   <!-- ═══════════  SCHEDULED TAB  ═══════════ -->
   <div id="scheduled" class="tab-content hidden">
-    <section class="card">
-      <div class="card-label">Scheduled Emails</div>
-      <p id="scheduled-mode-desc" class="help-text" style="margin-bottom:10px;"></p>
-      <div id="scheduled-list">
-        <div class="scheduled-empty">No scheduled emails.</div>
+
+    <div class="tracker-tabs">
+      <button class="tracker-tab-btn active" data-tracker="followup">
+        🔔 Follow-up<span id="followup-count" class="tracker-count hidden">0</span>
+      </button>
+      <button class="tracker-tab-btn" data-tracker="scheduled">🕐 Scheduled</button>
+      <button class="tracker-tab-btn" data-tracker="sent">✉ Sent</button>
+    </div>
+
+    <section class="card" style="margin-top:0;">
+      <div id="tracker-list">
+        <div class="scheduled-empty">Loading…</div>
       </div>
     </section>
+
   </div><!-- /scheduled -->
 
   <script src="../utils/gmail.js"></script>

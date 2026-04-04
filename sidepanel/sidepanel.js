@@ -67,9 +67,9 @@ const el = {
   // Status
   statusMsg:        $('status-msg'),
 
-  // Scheduled tab
-  scheduledList:    $('scheduled-list'),
-  scheduledModeDesc: $('scheduled-mode-desc'),
+  // Scheduled/Tracker tab
+  trackerList:      $('tracker-list'),
+  followupCount:    $('followup-count'),
 
   // Settings
   redirectUriDisplay: $('redirect-uri-display'),
@@ -434,6 +434,7 @@ async function sendEmail() {
         }
         const result = JSON.parse(rawText);
         if (!result.success) throw new Error(result.error || 'Scheduling failed.');
+        await addEmailLog({ to, subject, snippet: body.slice(0, 150), status: 'scheduled', scheduledTime: scheduledTime.toISOString(), sentAt: null, jobId: result.jobId });
         showStatus(`✅ Scheduled via Google Apps Script for ${scheduledTime.toLocaleString()}.`, 'success');
       } else {
         // Fallback: chrome.alarms (Chrome must be open at send time)
@@ -449,10 +450,9 @@ async function sendEmail() {
           },
           scheduledTime: scheduledTime.toISOString(),
         });
-        if (!response?.success) throw new Error(response?.error || 'Scheduling failed.');
-        showStatus(`⏰ Scheduled for ${scheduledTime.toLocaleString()}. (Tip: set up Server Scheduler so Chrome doesn’t need to be open.)`, 'info');
+        if (!response?.success) throw new Error(response?.error || 'Scheduling failed.');        await addEmailLog({ to, subject, snippet: body.slice(0, 150), status: 'scheduled', scheduledTime: scheduledTime.toISOString(), sentAt: null, jobId: null });        showStatus(`⏰ Scheduled for ${scheduledTime.toLocaleString()}. (Tip: set up Server Scheduler so Chrome doesn’t need to be open.)`, 'info');
       }
-      loadScheduledEmails();
+      loadTracker();
     } else {
       const token = await GmailAPI.getAuthToken(false);
       await GmailAPI.sendEmail({
@@ -465,6 +465,7 @@ async function sendEmail() {
         attachmentName:   resume?.name   || null,
         attachmentBase64: resume?.base64 || null,
       });
+      await addEmailLog({ to, subject, snippet: body.slice(0, 150), status: 'sent', sentAt: new Date().toISOString(), scheduledTime: null });
       showStatus('Email sent successfully!', 'success');
     }
 
@@ -527,113 +528,171 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-async function loadScheduledEmails() {
-  if (!el.scheduledList) return;
+/* ═══════════════════════════════════════════════════════════
+   Email log (local tracking)
+   ═══════════════════════════════════════════════════════════ */
+async function getEmailLog() {
+  const { emailLog } = await chrome.storage.local.get('emailLog');
+  return Array.isArray(emailLog) ? emailLog : [];
+}
 
+async function addEmailLog(entry) {
+  const log = await getEmailLog();
+  log.unshift({ id: crypto.randomUUID(), followedUp: false, followedUpAt: null, jobId: null, ...entry });
+  if (log.length > 300) log.splice(250);
+  await chrome.storage.local.set({ emailLog: log });
+}
+
+async function updateEmailLog(id, changes) {
+  const log = await getEmailLog();
+  const idx = log.findIndex(e => e.id === id);
+  if (idx !== -1) {
+    log[idx] = { ...log[idx], ...changes };
+    await chrome.storage.local.set({ emailLog: log });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Tracker
+   ═══════════════════════════════════════════════════════════ */
+let trackerActiveTab = 'followup';
+const FOLLOWUP_DAYS  = 7;
+
+async function reconcileLog() {
+  const log = await getEmailLog();
+  const scheduled = log.filter(e => e.status === 'scheduled');
+  if (!scheduled.length) return;
+
+  const now = Date.now();
   const script = await getScriptConfig_();
+  let scriptJobIds = new Set();
 
   if (script) {
-    // ── Server-side queue (Apps Script) ──────────────────────────
-    if (el.scheduledModeDesc) {
-      el.scheduledModeDesc.innerHTML = '✅ <strong>Server Scheduler active.</strong> Emails send from Google\'s servers — your laptop and Chrome do not need to be open.';
-      el.scheduledModeDesc.style.color = '#057642';
-    }
     try {
-      const res  = await fetch(script.url, {
-        method: 'POST',
-        redirect: 'follow',
+      const res = await fetch(script.url, {
+        method: 'POST', redirect: 'follow',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'list', secret: script.secret }),
       });
       const data = await res.json();
-      if (!data.success) {
-        el.scheduledList.innerHTML = `<div class="scheduled-empty">Could not load: ${escHtml(data.error)}</div>`;
-        return;
+      if (data.success) scriptJobIds = new Set((data.jobs || []).map(j => j.id));
+    } catch (_) {}
+  }
+
+  let changed = false;
+  for (const entry of log) {
+    if (entry.status !== 'scheduled') continue;
+    const dueMs = new Date(entry.scheduledTime).getTime();
+    if (dueMs > now - 2 * 60 * 1000) continue;
+    if (entry.jobId) {
+      if (script && !scriptJobIds.has(entry.jobId)) {
+        entry.status = 'sent'; entry.sentAt = entry.scheduledTime; changed = true;
       }
-      if (!data.jobs.length) {
-        el.scheduledList.innerHTML = '<div class="scheduled-empty">No scheduled emails.</div>';
-        return;
+    } else {
+      if (dueMs < now - 10 * 60 * 1000) {
+        entry.status = 'sent'; entry.sentAt = entry.scheduledTime; changed = true;
       }
-      el.scheduledList.innerHTML = '';
-      data.jobs.forEach(job => {
-        const humanTime = new Date(job.scheduledTime).toLocaleString();
-        const item = document.createElement('div');
-        item.className = 'scheduled-item';
-        item.innerHTML = `
-          <div class="scheduled-item-info">
-            <div class="scheduled-item-to">${escHtml(job.to || '—')}</div>
-            <div class="scheduled-item-subj">${escHtml(job.subject || '(no subject)')}</div>
-            <div class="scheduled-item-time">☁️ ${humanTime}</div>
-          </div>
-          <button class="btn btn-ghost btn-sm" data-cancel-script="${escHtml(job.id)}" title="Cancel">Cancel</button>
-        `;
-        el.scheduledList.appendChild(item);
-      });
-      el.scheduledList.querySelectorAll('[data-cancel-script]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const jobId = btn.dataset.cancelScript;
+    }
+  }
+  if (changed) await chrome.storage.local.set({ emailLog: log });
+}
+
+async function loadTracker() {
+  if (!el.trackerList) return;
+  el.trackerList.innerHTML = '<div class="scheduled-empty">Loading\u2026</div>';
+  await reconcileLog();
+  const log = await getEmailLog();
+
+  const cutoff = Date.now() - FOLLOWUP_DAYS * 86400 * 1000;
+  const followupEntries  = log.filter(e => e.status === 'sent' && !e.followedUp && new Date(e.sentAt || e.scheduledTime).getTime() < cutoff);
+  const scheduledEntries = log.filter(e => e.status === 'scheduled');
+  const sentEntries      = log.filter(e => e.status === 'sent');
+
+  if (followupEntries.length > 0) {
+    el.followupCount.textContent = followupEntries.length;
+    el.followupCount.classList.remove('hidden');
+  } else {
+    el.followupCount.classList.add('hidden');
+  }
+
+  const entries = trackerActiveTab === 'followup'  ? followupEntries
+                : trackerActiveTab === 'scheduled' ? scheduledEntries
+                : sentEntries;
+  renderTrackerItems(entries);
+}
+
+function renderTrackerItems(entries) {
+  const list = el.trackerList;
+  const msgs = { followup: 'No follow-ups due. \ud83c\udf89', scheduled: 'No scheduled emails.', sent: 'No sent emails logged yet.' };
+  if (entries.length === 0) {
+    list.innerHTML = `<div class="scheduled-empty">${msgs[trackerActiveTab]}</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  entries.forEach(entry => {
+    const item = document.createElement('div');
+    item.className = 'scheduled-item';
+
+    let timeHtml = '', actionHtml = '';
+    if (trackerActiveTab === 'followup') {
+      const d = new Date(entry.sentAt || entry.scheduledTime).toLocaleDateString();
+      timeHtml   = `<div class="scheduled-item-time">\u2709 Sent ${d} <span class="followup-tag">\ud83d\udd14 Follow-up due</span></div>`;
+      actionHtml = `<button class="btn btn-sm" style="flex-shrink:0;background:#fff3cd;color:#856404;border:1px solid #ffc107;" data-followup-id="${escHtml(entry.id)}">Done</button>`;
+    } else if (trackerActiveTab === 'scheduled') {
+      const d    = new Date(entry.scheduledTime).toLocaleString();
+      const icon = entry.jobId ? '\u2601\ufe0f' : '\u23f0';
+      timeHtml   = `<div class="scheduled-item-time">${icon} ${d}</div>`;
+      actionHtml = `<button class="btn btn-ghost btn-sm" style="flex-shrink:0;" data-cancel-id="${escHtml(entry.id)}" data-cancel-job="${escHtml(entry.jobId || '')}">Cancel</button>`;
+    } else {
+      const d  = new Date(entry.sentAt || entry.scheduledTime).toLocaleDateString();
+      const fu = entry.followedUp ? ' <span style="color:#057642;font-size:10px;">\u2713 followed up</span>' : '';
+      timeHtml = `<div class="scheduled-item-time">\u2709 ${d}${fu}</div>`;
+    }
+
+    const snippetHtml = entry.snippet
+      ? `<div class="tracker-item-snippet">\u201c${escHtml(entry.snippet.slice(0, 100))}\u2026\u201d</div>` : '';
+
+    item.innerHTML = `
+      <div class="scheduled-item-info">
+        <div class="scheduled-item-to">${escHtml(entry.to)}</div>
+        <div class="scheduled-item-subj">${escHtml(entry.subject)}</div>
+        ${snippetHtml}
+        ${timeHtml}
+      </div>
+      ${actionHtml}
+    `;
+    list.appendChild(item);
+  });
+
+  list.querySelectorAll('[data-followup-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await updateEmailLog(btn.dataset.followupId, { followedUp: true, followedUpAt: new Date().toISOString() });
+      loadTracker();
+    });
+  });
+
+  list.querySelectorAll('[data-cancel-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const logId = btn.dataset.cancelId;
+      const jobId = btn.dataset.cancelJob;
+      if (jobId) {
+        const script = await getScriptConfig_();
+        if (script) {
           try {
             await fetch(script.url, {
-              method: 'POST',
-              redirect: 'follow',
+              method: 'POST', redirect: 'follow',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'cancel', secret: script.secret, jobId }),
             });
           } catch (_) {}
-          loadScheduledEmails();
-        });
-      });
-    } catch (_) {
-      el.scheduledList.innerHTML = '<div class="scheduled-empty">Could not reach the Apps Script server.</div>';
-    }
-    return;
-  }
-
-  // ── Fallback: chrome.alarms queue ────────────────────────────
-  if (el.scheduledModeDesc) {
-    el.scheduledModeDesc.innerHTML = '⚠️ <strong>Server Scheduler not configured.</strong> Chrome must be open at send time. Go to <strong>Settings → Server Scheduler</strong> to remove this limitation.';
-    el.scheduledModeDesc.style.color = '#b45309';
-  }
-  const alarms  = await chrome.alarms.getAll();
-  const pending = alarms.filter(a => a.name.startsWith('scheduledEmail_'));
-
-  if (pending.length === 0) {
-    el.scheduledList.innerHTML = '<div class="scheduled-empty">No scheduled emails.<br><small style="color:#888;">Tip: configure Server Scheduler in Settings so emails send without Chrome.</small></div>';
-    return;
-  }
-
-  const stored = await chrome.storage.local.get(pending.map(a => a.name));
-
-  el.scheduledList.innerHTML = '';
-  pending
-    .sort((a, b) => a.scheduledTime - b.scheduledTime)
-    .forEach(alarm => {
-      const data = stored[alarm.name];
-      if (!data) return;
-      const humanTime = new Date(alarm.scheduledTime).toLocaleString();
-      const item = document.createElement('div');
-      item.className = 'scheduled-item';
-      item.innerHTML = `
-        <div class="scheduled-item-info">
-          <div class="scheduled-item-to">${escHtml(data.to || '—')}</div>
-          <div class="scheduled-item-subj">${escHtml(data.subject || '(no subject)')}</div>
-          <div class="scheduled-item-time">⏰ ${humanTime} <span style="color:#c50;font-size:10px;">(Chrome must be open)</span></div>
-        </div>
-        <button class="btn btn-ghost btn-sm" data-cancel="${escHtml(alarm.name)}" title="Cancel">Cancel</button>
-      `;
-      el.scheduledList.appendChild(item);
-    });
-
-  el.scheduledList.querySelectorAll('[data-cancel]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const name = btn.dataset.cancel;
-      await chrome.alarms.clear(name);
-      await chrome.storage.local.remove(name);
-      loadScheduledEmails();
+        }
+      }
+      await updateEmailLog(logId, { status: 'cancelled' });
+      loadTracker();
     });
   });
 }
-
 function setDefaultScheduleTime() {
   // Default to tomorrow at 9 AM
   const d = new Date();
@@ -841,15 +900,23 @@ function bindEvents() {
     }
     if (msg.action === 'scheduledEmailSent') {
       showStatus(`Scheduled email to ${msg.to} was sent successfully.`, 'success', 6000);
-      loadScheduledEmails();
+      loadTracker();
     }
   });
 
-  // Load scheduled list when the tab is clicked
+  // Tracker tab — sub-tab switching + initial load
   el.tabBtns.forEach(btn => {
     if (btn.dataset.tab === 'scheduled') {
-      btn.addEventListener('click', loadScheduledEmails);
+      btn.addEventListener('click', loadTracker);
     }
+  });
+  document.querySelectorAll('.tracker-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tracker-tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      trackerActiveTab = btn.dataset.tracker;
+      loadTracker();
+    });
   });
 
   // Manual refresh button on profile card
