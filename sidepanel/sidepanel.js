@@ -35,14 +35,12 @@ const el = {
 
   // Step 1
   recipientEmail:   $('recipient-email'),
-  emailContext:     $('email-context'),
   generateBtn:      $('generate-btn'),
 
   // Step 2 - review
   reviewSection:    $('review-section'),
   emailSubject:     $('email-subject'),
   emailBody:        $('email-body'),
-  regenerateBtn:    $('regenerate-btn'),
   wordCount:        $('word-count'),
 
   // Step 3 - send
@@ -68,15 +66,6 @@ const el = {
   scheduledModeDesc: $('scheduled-mode-desc'),
 
   // Settings
-  aiProvider:         $('ai-provider'),
-  aiApiKey:           $('ai-api-key'),
-  geminiModel:        $('gemini-model'),
-  geminiModelGroup:   $('gemini-model-group'),
-  groqModel:          $('groq-model'),
-  groqModelGroup:     $('groq-model-group'),
-  toggleKeyVis:       $('toggle-key-vis'),
-  testApiKeyBtn:      $('test-api-key-btn'),
-  testApiKeyResult:   $('test-api-key-result'),
   redirectUriDisplay: $('redirect-uri-display'),
   copyRedirectUri:    $('copy-redirect-uri'),
   gmailConnectBtn:    $('gmail-connect-btn'),
@@ -89,10 +78,8 @@ const el = {
   settingsRemoveResume: $('settings-remove-resume'),
   settingsResumeUpload: $('settings-resume-upload'),
   saveSettingsBtn:      $('save-settings-btn'),
+  subjectTemplate:      $('subject-template'),
   emailTemplate:        $('email-template'),
-  senderBackground:     $('sender-background'),
-  extractResumeBtn:     $('extract-from-resume-btn'),
-  extractResumeStatus:  $('extract-resume-status'),
   scriptUrl:            $('script-url'),
   scriptSecret:         $('script-secret'),
   testScriptBtn:        $('test-script-btn'),
@@ -122,38 +109,21 @@ function populateRedirectUri() {
    Settings persistence
    ═══════════════════════════════════════════════════════════ */
 async function loadSettings() {
-  const data = await chrome.storage.sync.get(['aiProvider', 'aiApiKey', 'geminiModel', 'groqModel', 'emailTemplate', 'senderBackground', 'scriptUrl', 'scriptSecret']);
-  if (data.aiProvider)        el.aiProvider.value        = data.aiProvider;
-  if (data.aiApiKey)          el.aiApiKey.value          = data.aiApiKey;
-  if (data.geminiModel)       el.geminiModel.value       = data.geminiModel;
-  if (data.groqModel)         el.groqModel.value         = data.groqModel;
-  if (data.emailTemplate !== undefined) el.emailTemplate.value = data.emailTemplate;
-  if (data.senderBackground !== undefined) el.senderBackground.value = data.senderBackground;
-  if (data.scriptUrl)         el.scriptUrl.value         = data.scriptUrl;
-  if (data.scriptSecret)      el.scriptSecret.value      = data.scriptSecret;
-  updateModelVisibility();
+  const data = await chrome.storage.sync.get(['subjectTemplate', 'emailTemplate', 'scriptUrl', 'scriptSecret']);
+  if (data.subjectTemplate !== undefined) el.subjectTemplate.value = data.subjectTemplate;
+  if (data.emailTemplate   !== undefined) el.emailTemplate.value   = data.emailTemplate;
+  if (data.scriptUrl)    el.scriptUrl.value    = data.scriptUrl;
+  if (data.scriptSecret) el.scriptSecret.value = data.scriptSecret;
 }
 
 async function saveSettings() {
   await chrome.storage.sync.set({
-    aiProvider:       el.aiProvider.value,
-    aiApiKey:         el.aiApiKey.value.trim(),
-    geminiModel:      el.geminiModel.value,
-    groqModel:        el.groqModel.value,
-    emailTemplate:    el.emailTemplate.value,
-    senderBackground: el.senderBackground.value,
-    scriptUrl:        el.scriptUrl.value.trim(),
-    scriptSecret:     el.scriptSecret.value.trim(),
+    subjectTemplate: el.subjectTemplate.value,
+    emailTemplate:   el.emailTemplate.value,
+    scriptUrl:       el.scriptUrl.value.trim(),
+    scriptSecret:    el.scriptSecret.value.trim(),
   });
   showStatus('Settings saved.', 'success', 2500);
-}
-
-function updateGeminiModelVisibility() { updateModelVisibility(); }
-
-function updateModelVisibility() {
-  const p = el.aiProvider.value;
-  el.geminiModelGroup.classList.toggle('hidden', p !== 'gemini');
-  el.groqModelGroup.classList.toggle('hidden',   p !== 'groq');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -216,40 +186,6 @@ function readFileAsBase64(file) {
     reader.readAsDataURL(file);
   });
 }
-
-// Best-effort text extraction from a PDF file.
-// Works for PDFs with an uncompressed text layer (most Word/Google Docs exports).
-function extractTextFromPDF(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const raw = e.target.result;
-        const words = [];
-
-        // Strategy 1: PDF text operators — (string)Tj and [(string)]TJ
-        const tjRe = /\(([^\\)]{2,100})\)\s*T[jJ]/g;
-        let m;
-        while ((m = tjRe.exec(raw)) !== null) {
-          const s = m[1].replace(/\\[0-9]{3}/g, ' ').replace(/\\\\/g, '').trim();
-          if (/[a-zA-Z]{2,}/.test(s)) words.push(s);
-        }
-
-        // Strategy 2: grab long readable sequences from uncompressed streams
-        const readable = raw.match(/[A-Za-z][A-Za-z0-9 ,.()\-+@&'"/]{12,}/g) || [];
-        words.push(...readable.filter(s => /[a-z]{4,}/i.test(s) && !/^(endobj|startxref|stream|xref|obj\b)/.test(s)));
-
-        const result = [...new Set(words)].join(' ').replace(/\s+/g, ' ').trim().slice(0, 2500);
-        resolve(result);
-      } catch (_) {
-        resolve('');
-      }
-    };
-    reader.onerror = () => resolve('');
-    reader.readAsText(file, 'latin1'); // latin1 preserves all byte values as characters
-  });
-}
-
 /* ═══════════════════════════════════════════════════════════
    Gmail connection
    ═══════════════════════════════════════════════════════════ */
@@ -347,46 +283,51 @@ function showNotLinkedIn(msg) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Email generation
+   Template fill
    ═══════════════════════════════════════════════════════════ */
-async function generateEmail() {
-  const apiKey   = el.aiApiKey.value.trim();
-  const provider = el.aiProvider.value;
-  const context  = el.emailContext.value.trim();
+function fillTemplate() {
+  const bodyTemplate    = el.emailTemplate.value.trim();
+  const subjectTemplate = el.subjectTemplate ? el.subjectTemplate.value.trim() : '';
 
-  if (!apiKey) {
-    showStatus('Add your AI API key in the Settings tab first.', 'error');
+  // If the body is already typed, substitute in place.
+  // Only load from saved template when the body is blank.
+  const hasExistingBody = el.emailBody.value.trim().length > 0;
+
+  if (!hasExistingBody && !bodyTemplate) {
+    showStatus('Type your email in the body above, or save a template in Settings \u2192 Email Template.', 'error');
     return;
   }
-  if (!context) {
-    showStatus('Please describe what this email is about.', 'error');
-    return;
+
+  if (!hasExistingBody) {
+    // Load from saved template
+    el.emailBody.value    = bodyTemplate;
+    el.emailSubject.value = subjectTemplate;
   }
-  // Use empty profile data if not on LinkedIn
-  const profile = state.profile || {};
 
-  setBtnLoading(el.generateBtn, true, 'Generating…');
+  const profile   = state.profile || {};
+  const firstName = (profile.name || '').split(' ')[0];
+  const company   = profile.currentCompany ||
+                    (profile.experience || '').split('\n')[0].split('\u2022')[0].trim();
+  const title     = profile.headline || '';
+  const field     = title.split(' at ')[0].split(',')[0].trim();
 
-  try {
-    const model = el.aiProvider.value === 'gemini' ? el.geminiModel.value
-              : el.aiProvider.value === 'groq'   ? el.groqModel.value
-              : undefined;
-    const template = el.emailTemplate.value.trim() || null;
-    const senderBg = el.senderBackground.value.trim() || null;
-    const { subject, body } = await AIHelper.generateEmail(profile, context, apiKey, provider, model, template, senderBg);
-    el.emailSubject.value = subject;
-    el.emailBody.value    = body;
-    updateWordCount();
-
-    el.reviewSection.classList.remove('hidden');
-    el.sendSection.classList.remove('hidden');
-    el.reviewSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (err) {
-    showStatus(`Generation failed: ${err.message}`, 'error');
-  } finally {
-    setBtnLoading(el.generateBtn, false, 'Generate Email with AI',
-      `<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`);
+  function sub(text) {
+    return text
+      .replace(/\[Name\]/g,        firstName    || '[Name]')
+      .replace(/\[Full Name\]/g,   profile.name || '[Full Name]')
+      .replace(/\[Company\]/g,     company      || '[Company]')
+      .replace(/\[Their Title\]/g, title        || '[Their Title]')
+      .replace(/\[Their Field\]/g, field        || '[Their Field]');
   }
+
+  // Always substitute in whatever is currently in the fields
+  el.emailBody.value    = sub(el.emailBody.value);
+  el.emailSubject.value = sub(el.emailSubject.value);
+  updateWordCount();
+
+  el.reviewSection.classList.remove('hidden');
+  el.sendSection.classList.remove('hidden');
+  el.reviewSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function updateWordCount() {
@@ -495,7 +436,6 @@ async function sendEmail() {
     el.emailBody.value    = '';
     el.reviewSection.classList.add('hidden');
     el.sendSection.classList.add('hidden');
-    el.emailContext.value = '';
 
   } catch (err) {
     showStatus(`Send failed: ${err.message}`, 'error');
@@ -687,65 +627,6 @@ function updateSendBtnLabel() {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Test API Key
-   ═══════════════════════════════════════════════════════════ */
-async function testApiKey() {
-  const apiKey   = el.aiApiKey.value.trim();
-  const provider = el.aiProvider.value;
-  const model    = el.aiProvider.value === 'gemini' ? el.geminiModel?.value
-                 : el.aiProvider.value === 'groq'   ? el.groqModel?.value
-                 : 'gpt-4o';
-  const resultEl = el.testApiKeyResult;
-
-  if (!apiKey) { resultEl.textContent = '⚠ Paste your API key first.'; resultEl.style.color = 'orange'; return; }
-
-  el.testApiKeyBtn.disabled = true;
-  el.testApiKeyBtn.textContent = 'Testing…';
-  resultEl.textContent = '';
-
-  try {
-    let res, data;
-    if (provider === 'openai') {
-      res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: model || 'gpt-4o', messages: [{ role: 'user', content: 'Say OK' }], max_tokens: 5 }),
-      });
-    } else if (provider === 'groq') {
-      res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: model || 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'Say OK' }], max_tokens: 5 }),
-      });
-    } else {
-      res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }], generationConfig: { maxOutputTokens: 5 } }),
-        }
-      );
-    }
-    data = await res.json();
-    if (res.ok) {
-      resultEl.textContent = '✓ API key works!';
-      resultEl.style.color = '#057642';
-    } else {
-      const msg = data?.error?.message || JSON.stringify(data);
-      resultEl.textContent = `✗ ${msg}`;
-      resultEl.style.color = '#cc1016';
-    }
-  } catch (e) {
-    resultEl.textContent = `✗ Network error: ${e.message}`;
-    resultEl.style.color = '#cc1016';
-  } finally {
-    el.testApiKeyBtn.disabled = false;
-    el.testApiKeyBtn.textContent = 'Test API Key';
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════
    Event bindings
    ═══════════════════════════════════════════════════════════ */
 function bindEvents() {
@@ -761,9 +642,8 @@ function bindEvents() {
     });
   });
 
-  // Generate / regenerate
-  el.generateBtn.addEventListener('click', generateEmail);
-  el.regenerateBtn.addEventListener('click', generateEmail);
+  // Fill template
+  el.generateBtn.addEventListener('click', fillTemplate);
 
   // Word count on edit
   el.emailBody.addEventListener('input', updateWordCount);
@@ -809,12 +689,6 @@ function bindEvents() {
     }
   });
 
-  // Settings — provider change shows/hides model selector
-  el.aiProvider.addEventListener('change', updateGeminiModelVisibility);
-
-  // Settings — Test API Key
-  $('test-api-key-btn').addEventListener('click', testApiKey);
-
   // Settings — Test Apps Script connection
   el.testScriptBtn.addEventListener('click', async () => {
     const url    = el.scriptUrl.value.trim();
@@ -855,13 +729,6 @@ function bindEvents() {
     }
   });
 
-  // Settings — API key visibility toggle
-  el.toggleKeyVis.addEventListener('click', () => {
-    const isHidden = el.aiApiKey.type === 'password';
-    el.aiApiKey.type = isHidden ? 'text' : 'password';
-    el.toggleKeyVis.title = isHidden ? 'Hide key' : 'Show key';
-  });
-
   // Settings — save
   el.saveSettingsBtn.addEventListener('click', saveSettings);
 
@@ -899,32 +766,6 @@ function bindEvents() {
   el.settingsRemoveResume.addEventListener('click', async () => {
     await removeSavedResume();
     showStatus('Default resume removed.', 'info', 2500);
-  });
-
-  // Settings — extract text from saved resume PDF into the senderBackground field
-  el.extractResumeBtn.addEventListener('click', async () => {
-    const stored = await chrome.storage.local.get(['resumeBase64', 'resumeName']);
-    if (!stored.resumeBase64) {
-      el.extractResumeStatus.textContent = 'No saved resume found. Upload one in the Default Resume section first.';
-      return;
-    }
-    el.extractResumeStatus.textContent = 'Extracting…';
-    try {
-      // Convert base64 back to a Blob/File for text extraction
-      const binary = atob(stored.resumeBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const file = new File([bytes], stored.resumeName || 'resume.pdf', { type: 'application/pdf' });
-      const text = await extractTextFromPDF(file);
-      if (text && text.length > 40) {
-        el.senderBackground.value = text;
-        el.extractResumeStatus.textContent = '✓ Extracted! Review and clean up, then Save Settings.';
-      } else {
-        el.extractResumeStatus.textContent = 'Could not extract text (PDF may be scanned/image-based). Paste your background manually.';
-      }
-    } catch (err) {
-      el.extractResumeStatus.textContent = 'Extraction failed. Please paste your background manually.';
-    }
   });
 
   // Listen for messages from background
