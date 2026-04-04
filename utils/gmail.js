@@ -136,14 +136,15 @@ const GmailAPI = (() => {
    * @param {string} opts.to              Recipient email
    * @param {string} opts.subject         Email subject
    * @param {string} opts.body            Plain-text email body
+   * @param {string|null} opts.htmlBody         HTML email body (optional; used when body contains links)
    * @param {string|null} opts.attachmentName    PDF filename
    * @param {string|null} opts.attachmentBase64  Base64-encoded PDF (no data: prefix)
    * @returns {Promise<{id, draft: false}>}
    */
   async function sendEmail(opts) {
-    const { token, from, to, subject, body, attachmentName, attachmentBase64 } = opts;
+    const { token, from, to, subject, body, htmlBody, attachmentName, attachmentBase64 } = opts;
 
-    const mimeRaw   = buildMimeMessage({ from, to, subject, body, attachmentName, attachmentBase64 });
+    const mimeRaw   = buildMimeMessage({ from, to, subject, body, htmlBody, attachmentName, attachmentBase64 });
     const rawBase64 = encodeBase64Url(mimeRaw);
 
     const res = await fetch(`${BASE}/messages/send`, {
@@ -166,39 +167,97 @@ const GmailAPI = (() => {
 
   /* ─── MIME builder ────────────────────────────────────────────── */
 
-  function buildMimeMessage({ from, to, subject, body, attachmentName, attachmentBase64 }) {
-    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  function buildMimeMessage({ from, to, subject, body, htmlBody, attachmentName, attachmentBase64 }) {
+    const outerBoundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const altBoundary   = `----=_Alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
     const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
+    const hasHtml = !!(htmlBody);
+    const hasAttachment = !!(attachmentName && attachmentBase64);
+
+    // Top-level content type depends on whether we have an attachment
+    const topType = hasAttachment
+      ? `multipart/mixed; boundary="${outerBoundary}"`
+      : (hasHtml ? `multipart/alternative; boundary="${altBoundary}"` : `text/plain; charset="UTF-8"`);
 
     const lines = [
       'MIME-Version: 1.0',
       `From: ${from}`,
       `To: ${to}`,
       `Subject: ${encodedSubject}`,
-      `Content-Type: multipart/mixed; boundary="${boundary}"`,
-      '',
-      `--${boundary}`,
-      'Content-Type: text/plain; charset="UTF-8"',
-      'Content-Transfer-Encoding: base64',
-      '',
-      chunkBase64(btoa(unescape(encodeURIComponent(body)))),
+      `Content-Type: ${topType}`,
       '',
     ];
 
-    if (attachmentName && attachmentBase64) {
+    if (!hasHtml && !hasAttachment) {
+      // Simple plain-text email
       lines.push(
-        `--${boundary}`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        chunkBase64(btoa(unescape(encodeURIComponent(body)))),
+        '',
+      );
+    } else if (hasAttachment) {
+      // multipart/mixed wrapper
+      lines.push(`--${outerBoundary}`);
+      if (hasHtml) {
+        // Nest a multipart/alternative inside
+        lines.push(
+          `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+          '',
+          `--${altBoundary}`,
+          'Content-Type: text/plain; charset="UTF-8"',
+          'Content-Transfer-Encoding: base64',
+          '',
+          chunkBase64(btoa(unescape(encodeURIComponent(body)))),
+          '',
+          `--${altBoundary}`,
+          'Content-Type: text/html; charset="UTF-8"',
+          'Content-Transfer-Encoding: base64',
+          '',
+          chunkBase64(btoa(unescape(encodeURIComponent(htmlBody)))),
+          '',
+          `--${altBoundary}--`,
+          '',
+        );
+      } else {
+        lines.push(
+          'Content-Type: text/plain; charset="UTF-8"',
+          'Content-Transfer-Encoding: base64',
+          '',
+          chunkBase64(btoa(unescape(encodeURIComponent(body)))),
+          '',
+        );
+      }
+      // Attachment part
+      lines.push(
+        `--${outerBoundary}`,
         'Content-Type: application/pdf',
         'Content-Transfer-Encoding: base64',
         `Content-Disposition: attachment; filename="${attachmentName}"`,
         '',
         chunkBase64(attachmentBase64),
         '',
+        `--${outerBoundary}--`,
+      );
+    } else {
+      // multipart/alternative, no attachment
+      lines.push(
+        `--${altBoundary}`,
+        'Content-Type: text/plain; charset="UTF-8"',
+        'Content-Transfer-Encoding: base64',
+        '',
+        chunkBase64(btoa(unescape(encodeURIComponent(body)))),
+        '',
+        `--${altBoundary}`,
+        'Content-Type: text/html; charset="UTF-8"',
+        'Content-Transfer-Encoding: base64',
+        '',
+        chunkBase64(btoa(unescape(encodeURIComponent(htmlBody)))),
+        '',
+        `--${altBoundary}--`,
       );
     }
-
-    lines.push(`--${boundary}--`);
 
     return lines.join('\r\n');
   }

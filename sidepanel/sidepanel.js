@@ -42,6 +42,12 @@ const el = {
   emailSubject:     $('email-subject'),
   emailBody:        $('email-body'),
   wordCount:        $('word-count'),
+  insertLinkBtn:    $('insert-link-btn'),
+  linkPanel:        $('link-panel'),
+  linkText:         $('link-text'),
+  linkUrl:          $('link-url'),
+  linkInsertBtn:    $('link-insert-btn'),
+  linkCancelBtn:    $('link-cancel-btn'),
 
   // Step 3 - send
   sendSection:      $('send-section'),
@@ -336,6 +342,34 @@ function updateWordCount() {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   HTML body builder
+   ═══════════════════════════════════════════════════════════ */
+/**
+ * Converts plain-text body (with [text](url) link syntax) to a simple HTML email.
+ * Returns null if there are no links (no need for HTML path).
+ */
+function toHtmlBody(plain) {
+  const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  if (!LINK_RE.test(plain)) return null; // no links — plain text is fine
+  LINK_RE.lastIndex = 0;
+
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  let html = '';
+  let last = 0;
+  let m;
+  while ((m = LINK_RE.exec(plain)) !== null) {
+    // Text before this link
+    html += esc(plain.slice(last, m.index)).replace(/\n/g, '<br>');
+    html += `<a href="${esc(m[2])}" style="color:#0a66c2;">${esc(m[1])}</a>`;
+    last = m.index + m[0].length;
+  }
+  html += esc(plain.slice(last)).replace(/\n/g, '<br>');
+
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">${html}</div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════
    Send / Schedule
    ═══════════════════════════════════════════════════════════ */
 async function sendEmail() {
@@ -369,6 +403,7 @@ async function sendEmail() {
   }
 
   const resume = state.resumeData || state.savedResumeData || null;
+  const htmlBody = toHtmlBody(body);
 
   setBtnLoading(el.sendBtn, true, mode === 'schedule' ? 'Scheduling…' : 'Sending…');
 
@@ -387,6 +422,7 @@ async function sendEmail() {
             to,
             subject,
             body,
+            htmlBody:         htmlBody || null,
             attachmentName:   resume?.name   || null,
             attachmentBase64: resume?.base64 || null,
             scheduledTime:   scheduledTime.toISOString(),
@@ -425,6 +461,7 @@ async function sendEmail() {
         to,
         subject,
         body,
+        htmlBody:         htmlBody || null,
         attachmentName:   resume?.name   || null,
         attachmentBase64: resume?.base64 || null,
       });
@@ -644,6 +681,33 @@ function bindEvents() {
 
   // Fill template
   el.generateBtn.addEventListener('click', fillTemplate);
+
+  // Insert Link button — shows/hides the mini link panel
+  el.insertLinkBtn.addEventListener('click', () => {
+    el.linkPanel.classList.toggle('hidden');
+    if (!el.linkPanel.classList.contains('hidden')) el.linkText.focus();
+  });
+  el.linkCancelBtn.addEventListener('click', () => {
+    el.linkPanel.classList.add('hidden');
+    el.linkText.value = '';
+    el.linkUrl.value  = '';
+  });
+  el.linkInsertBtn.addEventListener('click', () => {
+    const text = el.linkText.value.trim();
+    const url  = el.linkUrl.value.trim();
+    if (!text || !url) { showStatus('Enter both display text and URL.', 'error', 2500); return; }
+    const snippet = `[${text}](${url})`;
+    const ta    = el.emailBody;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value = ta.value.slice(0, start) + snippet + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + snippet.length;
+    ta.focus();
+    el.linkPanel.classList.add('hidden');
+    el.linkText.value = '';
+    el.linkUrl.value  = '';
+    updateWordCount();
+  });
 
   // Word count on edit
   el.emailBody.addEventListener('input', updateWordCount);

@@ -55,6 +55,7 @@ function doPost(e) {
         to:             data.to,
         subject:        data.subject,
         body:           data.body,
+        htmlBody:       data.htmlBody || null,
         attachmentName: data.attachmentName || null,
         driveFileId:    driveFileId,
         scheduledTime:  data.scheduledTime,
@@ -131,6 +132,7 @@ function processEmailQueue() {
 
 function sendJobEmail_(job) {
   const options = {};
+  if (job.htmlBody) options.htmlBody = job.htmlBody;
   if (job.driveFileId && job.attachmentName) {
     try {
       const file = DriveApp.getFileById(job.driveFileId);
