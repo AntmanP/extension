@@ -601,6 +601,36 @@ async function loadTracker() {
   if (!el.trackerList) return;
   el.trackerList.innerHTML = '<div class="scheduled-empty">Loading\u2026</div>';
   await reconcileLog();
+
+  // Pull live jobs from Apps Script and import any that aren't in the local log yet.
+  // This recovers emails scheduled before the Tracker existed.
+  const script = await getScriptConfig_();
+  if (script) {
+    try {
+      const res = await fetch(script.url, {
+        method: 'POST', redirect: 'follow',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list', secret: script.secret }),
+      });
+      const data = await res.json();
+      if (data.success && data.jobs.length) {
+        const existing = await getEmailLog();
+        const knownJobIds = new Set(existing.map(e => e.jobId).filter(Boolean));
+        for (const job of data.jobs) {
+          if (!knownJobIds.has(job.id)) {
+            await addEmailLog({
+              to: job.to, subject: job.subject,
+              snippet: (job.body || '').slice(0, 150),
+              status: 'scheduled',
+              scheduledTime: job.scheduledTime,
+              sentAt: null, jobId: job.id,
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   const log = await getEmailLog();
 
   const cutoff = Date.now() - FOLLOWUP_DAYS * 86400 * 1000;
